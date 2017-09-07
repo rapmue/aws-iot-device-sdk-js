@@ -98,6 +98,11 @@ function ThingShadowsClient(deviceOptions, thingShadowOptions) {
    // Track Thing Shadow registrations in here.
    //
    var thingShadows = [{}];
+   
+   var subscriptionCounter = {'update':{accepted: 0, rejected: 0, delta: 0},
+						'get':{accepted: 0, rejected: 0, delta: 0},
+						'delete':{accepted: 0, rejected: 0, delta: 0}
+	};
 
    //
    // Implements for every operation, used to construct clientToken.
@@ -127,11 +132,14 @@ function ThingShadowsClient(deviceOptions, thingShadowOptions) {
          operationTimeout = thingShadowOptions.operationTimeout;
       }
    }
+   
+   var callbacktest = [];
+   var callbackcalled = false;
 
    //
    // Private function to subscribe and unsubscribe from topics.
    //
-   this._handleSubscriptions = function(thingName, topicSpecs, devFunction, callback) {
+   this._handleSubscriptions = function(thingName, topicSpecs, devFunction, callback) {   
       var topics = [];
 
       //
@@ -140,9 +148,22 @@ function ThingShadowsClient(deviceOptions, thingShadowOptions) {
       for (var i = 0, topicsLen = topicSpecs.length; i < topicsLen; i++) {
          for (var j = 0, opsLen = topicSpecs[i].operations.length; j < opsLen; j++) {
             for (var k = 0, statLen = topicSpecs[i].statii.length; k < statLen; k++) {
-               topics.push(buildThingShadowTopic(thingName,
-                  topicSpecs[i].operations[j],
-                  topicSpecs[i].statii[k]));
+				if(devFunction === 'subscribe'){
+					subscriptionCounter[topicSpecs[i].operations[j]][topicSpecs[i].statii[k]]++;
+				}else{
+					subscriptionCounter[topicSpecs[i].operations[j]][topicSpecs[i].statii[k]]--;
+				}
+				
+				if(subscriptionCounter[topicSpecs[i].operations[j]][topicSpecs[i].statii[k]] === 1)
+				{
+					topics.push(buildThingShadowTopic("+",
+					  topicSpecs[i].operations[j],
+					  topicSpecs[i].statii[k]));
+				}else if(subscriptionCounter[topicSpecs[i].operations[j]][topicSpecs[i].statii[k]] === 0){
+					topics.push(buildThingShadowTopic("+",
+					  topicSpecs[i].operations[j],
+					  topicSpecs[i].statii[k]));
+				}
             }
          }
       }
@@ -156,15 +177,23 @@ function ThingShadowsClient(deviceOptions, thingShadowOptions) {
       var args = [];
       args.push(topics);
       if (devFunction === 'subscribe') {
+		  
+		  if(!callbackcalled) callbacktest.push(callback);
+		  
          // QoS only applicable for subscribe
          args.push({
             qos: thingShadows[thingName].qos
          });
          // add our callback to check the SUBACK response for granted subscriptions
          args.push(function(err, granted) {
-            if (!isUndefined(callback)) {
+			 var callbacks = callbacktest.splice(0, callbacktest.length);
+			 for(var i = 0; i < callbacks.length; i++){
+				 
+				 console.log("callback called");
+				 
+            if (!isUndefined(callbacks[i])) {
                if (err) {
-                  callback(err);
+                  callbacks[i](err);
                   return;
                }
                //
@@ -181,13 +210,15 @@ function ThingShadowsClient(deviceOptions, thingShadowOptions) {
               }
 
               if (failedTopics.length > 0) {
-                 callback('Not all subscriptions were granted', failedTopics);
+                 callbacks[i]('Not all subscriptions were granted', failedTopics);
                  return;
               }
 
               // all subscriptions were granted
-              callback();
+              callbacks[i]();
             }
+			 }
+			 callbackcalled = true;
          });
       } else {
          if (!isUndefined(callback)) {
@@ -195,7 +226,13 @@ function ThingShadowsClient(deviceOptions, thingShadowOptions) {
          }
       }
 
-      device[devFunction].apply(device, args);
+	  if(topics.length > 0){
+		device[devFunction].apply(device, args);
+	  }
+	  
+	  if(callbackcalled){
+		  if(!isUndefined(callback)) callback();
+	  }
    };
 
    //
